@@ -359,6 +359,7 @@
     if (!S.user) html = viewLogin();
     else if (!S.ready) html = '<div class="boot">Loading…</div>';
     else if (!S.me) html = viewNotMember();
+    else if (S.locked) html = viewLock();
     else {
       const views = { home: viewHome, history: viewHistory, trends: viewTrends, category: viewCategory, savings: viewSavings, budgets: viewBudgets, add: viewAdd, edit: viewAdd, scan: viewScan };
       html = (views[S.route] || viewHome)();
@@ -796,6 +797,7 @@
     const account = '<section class="section" aria-label="Household"><div class="card pad" style="display:flex;align-items:center;gap:12px">' + avatars() +
       '<div style="flex:1;display:flex;flex-direction:column"><span style="font-weight:600">' + esc(S.members.map((m) => m.display_name).join(' & ')) + '</span><span class="muted" style="font-size:13px">Signed in as ' + esc(S.me.display_name) + ' · syncs on every device</span></div></div>' +
       '<div class="list">' +
+      (S.lockSupported ? '<button class="row" data-act="toggleLock" role="switch" aria-checked="' + Lock.enabled + '"><span class="ico sm">' + svg('user', 16) + '</span><span class="grow"><span class="t">Face ID lock</span><span class="s">' + (Lock.enabled ? 'On · asks for Face ID when the app opens' : 'Off · ask for Face ID when the app opens') + '</span></span><span class="toggle' + (Lock.enabled ? ' on' : '') + '" aria-hidden="true"><i></i></span></button>' : '') +
       '<button class="row" data-act="changePassword"><span class="ico sm">' + svg('key', 16) + '</span><span class="grow"><span class="t">Change password</span></span>' + svg('right', 18) + '</button>' +
       (api().demo ? '<button class="row" data-act="demoSwitch"><span class="ico sm">' + svg('user', 16) + '</span><span class="grow"><span class="t">Demo: act as ' + esc(others) + '</span></span></button>' : '') +
       '<button class="row" data-act="signOut"><span class="ico sm warn">' + svg('logout', 16) + '</span><span class="grow"><span class="t">Sign out</span></span></button>' +
@@ -905,6 +907,53 @@
     d.setMonth(d.getMonth() + step[0]);
     d.setDate(d.getDate() + step[1]);
     return isoOf(d);
+  }
+
+  // =====================================================================
+  // Face ID lock — optional, per device. Uses the phone's built-in Face ID /
+  // Touch ID / passcode through WebAuthn; nothing leaves the device.
+  // =====================================================================
+  const LOCK_KEY = 'ob-face-lock';
+  const LOCK_GRACE_MS = 60 * 1000;
+  const Lock = {
+    get enabled() { try { return !!localStorage.getItem(LOCK_KEY); } catch (e) { return false; } },
+    credId() { try { return JSON.parse(localStorage.getItem(LOCK_KEY)).id; } catch (e) { return null; } },
+    clear() { try { localStorage.removeItem(LOCK_KEY); } catch (e) { /* ignore */ } },
+    b64(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); },
+    unb64(str) { return Uint8Array.from(atob(str), (c) => c.charCodeAt(0)); },
+    rand(n) { return crypto.getRandomValues(new Uint8Array(n)); },
+    async supported() {
+      try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (e) { return false; }
+    },
+    async register() {
+      const cred = await navigator.credentials.create({ publicKey: {
+        challenge: Lock.rand(32),
+        rp: { name: 'Our Budget', id: location.hostname },
+        user: { id: Lock.rand(16), name: (S.me && S.me.display_name) || 'me', displayName: (S.me && S.me.display_name) || 'me' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+        timeout: 60000, attestation: 'none',
+      } });
+      localStorage.setItem(LOCK_KEY, JSON.stringify({ id: Lock.b64(cred.rawId) }));
+    },
+    async verify() {
+      const id = Lock.credId();
+      if (!id) return true;
+      await navigator.credentials.get({ publicKey: {
+        challenge: Lock.rand(32), allowCredentials: [{ type: 'public-key', id: Lock.unb64(id) }],
+        userVerification: 'required', timeout: 60000,
+      } });
+      return true;
+    },
+  };
+
+  function viewLock() {
+    return '<main class="login" style="text-align:center;align-items:center">' +
+      '<img src="icons/icon-192.png" alt="" style="width:72px;height:72px;border-radius:18px">' +
+      '<h1>Our Budget is locked</h1><p class="muted">Use Face ID to open it.</p>' +
+      (S.lockErr ? '<p class="err" role="alert">' + esc(S.lockErr) + '</p>' : '') +
+      '<button class="btn" data-act="unlock" style="max-width:320px">' + svg('key', 20) + 'Unlock with Face ID</button>' +
+      '<button class="btn ghost" data-act="signOut" style="max-width:320px">Sign out instead</button></main>';
   }
 
   // =====================================================================
@@ -1050,7 +1099,7 @@
       try {
         const res = await api().signIn(L.email.trim(), L.password);
         L.password = '';
-        await start(res.user);
+        await start(res.user, true);
       } catch (e) { L.err = errMsg(e); }
       L.busy = false;
       render();
@@ -1060,7 +1109,27 @@
       if (!email) { S.login.err = 'Type your email above first, then tap “Forgot password?”.'; render(); return; }
       try { await api().resetPassword(email); toast('Check your email for a reset link.'); } catch (e) { toast(errMsg(e), true); }
     },
-    async signOut() { await api().signOut(); S.user = null; S.ready = false; S.me = null; location.hash = ''; render(); },
+    async signOut() { Lock.clear(); S.locked = false; await api().signOut(); S.user = null; S.ready = false; S.me = null; location.hash = ''; render(); },
+    async unlock() {
+      S.lockErr = '';
+      try { await Lock.verify(); S.locked = false; S.lockErr = ''; render(); }
+      catch (e) { S.lockErr = e && e.name === 'NotAllowedError' ? 'Face ID was cancelled. Try again.' : 'Couldn’t check Face ID: ' + errMsg(e); render(); }
+    },
+    async toggleLock() {
+      try {
+        if (Lock.enabled) {
+          await Lock.verify();
+          Lock.clear();
+          toast('Face ID lock is off.');
+        } else {
+          await Lock.register();
+          toast('Face ID lock is on for this device.');
+        }
+      } catch (e) {
+        toast(e && e.name === 'NotAllowedError' ? 'Face ID was cancelled; nothing changed.' : 'Couldn’t set up Face ID: ' + errMsg(e), true);
+      }
+      render();
+    },
     changePassword() { S.sheet = { type: 'password' }; render(); },
     async savePassword() {
       const sh = S.sheet;
@@ -1380,8 +1449,9 @@
     } catch (e) { /* try again next time */ }
   }
 
-  async function start(user) {
+  async function start(user, fromLogin) {
     S.user = user;
+    S.locked = Lock.enabled && !fromLogin;
     render();
     try {
       await refresh();
@@ -1403,7 +1473,14 @@
     if (demo) await Receipt.loadScript('demo.js');
     S.api = demo ? window.DemoAPI() : SupaAPI(window.APP_CONFIG);
     window.addEventListener('hashchange', () => { if (S.ready) onRoute(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ready && S.me) onRemoteChange(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { S.hiddenAt = Date.now(); return; }
+      if (S.ready && S.me) {
+        if (Lock.enabled && !S.locked && S.hiddenAt && Date.now() - S.hiddenAt > LOCK_GRACE_MS) { S.locked = true; S.lockErr = ''; render(); }
+        onRemoteChange();
+      }
+    });
+    Lock.supported().then((ok) => { S.lockSupported = ok; if (S.ready) render(); });
     S.api.onAuth((event) => {
       if (event === 'PASSWORD_RECOVERY') { S.recovery = true; S.sheet = { type: 'password', recovery: true }; render(); }
       if (event === 'SIGNED_OUT' && S.user) { S.user = null; S.ready = false; S.me = null; render(); }

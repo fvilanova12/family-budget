@@ -349,3 +349,7 @@ button.row { cursor: pointer; }
 .stat-pair > div { background: var(--card-2); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .stat-pair span { font-size: 12px; color: var(--muted); }
 .stat-pair strong { font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.toggle { width: 46px; height: 28px; border-radius: 14px; background: var(--track); position: relative; flex-shrink: 0; transition: background 0.2s; }
+.toggle i { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 11px; background: var(--muted); transition: transform 0.2s, background 0.2s; }
+.toggle.on { background: var(--lime); }
+.toggle.on i { transform: translateX(18px); background: var(--lime-ink); }
