@@ -1,6 +1,7 @@
-// Keeps the app shell available offline. Always tries the network first so
+// Keeps the app shell available offline. Always asks the network first and
+// revalidates (GitHub Pages lets browsers cache files for 10 minutes), so
 // updates show up straight away; Supabase requests are never cached.
-const CACHE = 'our-budget-v1';
+const CACHE = 'our-budget-v2';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'ocr.js', 'config.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/apple-touch-icon.png'];
 
@@ -20,7 +21,7 @@ self.addEventListener('fetch', (e) => {
   const isLib = url.hostname === 'cdn.jsdelivr.net' || url.hostname.endsWith('gstatic.com') || url.hostname === 'fonts.googleapis.com';
   if (!sameOrigin && !isLib) return;
   e.respondWith(
-    fetch(e.request).then((res) => {
+    fetch(e.request, sameOrigin ? { cache: 'no-cache' } : undefined).then((res) => {
       if (res.ok && (sameOrigin || isLib)) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));

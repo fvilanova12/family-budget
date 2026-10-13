@@ -289,6 +289,10 @@
     };
   }
 
+  function reloadIfIdle() {
+    if (S.updateReady && !S.sheet && !S.busy && ['home', 'history', 'savings', 'budgets'].includes(S.route)) location.reload();
+  }
+
   function onRoute() {
     const { route, params } = parseHash();
     if (['home', 'history', 'savings', 'budgets'].includes(route)) S.lastMain = route;
@@ -311,6 +315,7 @@
     }
     render();
     window.scrollTo(0, 0);
+    reloadIfIdle();
   }
   const go = (hash) => { if (location.hash === hash) onRoute(); else location.hash = hash; };
 
@@ -1308,7 +1313,16 @@
       toast(errMsg(e), true);
     }
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || local) && !demo) {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
+      // When a new version is published, reload once it's safe (not mid-entry).
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController) return;
+        S.updateReady = true;
+        reloadIfIdle();
+      });
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+      }).catch(() => {});
     }
   }
 
