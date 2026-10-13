@@ -196,12 +196,16 @@
     return '<span class="avatar ' + (cls || '') + '" style="background:' + blend(fg, '#0E0F12', 0.16) + ';color:' + fg + '" title="' + esc(m.display_name) + '">' + esc((m.display_name || '?').trim()[0].toUpperCase()) + '</span>';
   }
 
+  // Budget in force for a month: the latest one set on or before it. Months
+  // before the first budget use the earliest one, so history stays comparable.
   function budgetFor(catId, month) {
-    let best = null;
+    let best = null, first = null;
     for (const r of S.budgetRows) {
-      if (r.category_id === catId && r.month <= month && (!best || r.month > best.month)) best = r;
+      if (r.category_id !== catId) continue;
+      if (r.month <= month && (!best || r.month > best.month)) best = r;
+      if (!first || r.month < first.month) first = r;
     }
-    return best ? +best.amount : 0;
+    return best ? +best.amount : first ? +first.amount : 0;
   }
   const totalBudget = (month) => expenseCats().reduce((s, c) => s + budgetFor(c.id, month), 0);
 
@@ -285,7 +289,7 @@
     return {
       id: null, kind: kind || 'expense', amountStr: '', amountText: null, occurred_on: todayISO(), paid_by: S.me ? S.me.user_id : null,
       category_id: null, merchant: '', note: '', payment_method: kind === 'income' ? 'transfer' : 'card', catTouched: false,
-      showNote: false, receipt_path: null, recurring_bill_id: null,
+      showNote: false, receipt_path: null, recurring_bill_id: null, refund: false,
     };
   }
 
@@ -304,7 +308,7 @@
       const t = S.txs.find((x) => x.id === params.id);
       if (!t) { location.hash = '#/history'; return; }
       S.form = Object.assign(newForm(t.kind), {
-        id: t.id, kind: t.kind, amountStr: Number.isInteger(round2(+t.amount)) ? String(round2(+t.amount)) : round2(+t.amount).toFixed(2), occurred_on: t.occurred_on, paid_by: t.paid_by,
+        id: t.id, kind: t.kind, refund: +t.amount < 0, amountStr: Number.isInteger(round2(Math.abs(t.amount))) ? String(round2(Math.abs(t.amount))) : round2(Math.abs(t.amount)).toFixed(2), occurred_on: t.occurred_on, paid_by: t.paid_by,
         category_id: t.category_id, merchant: t.merchant || '', note: t.note || '', payment_method: t.payment_method,
         catTouched: true, showNote: !!t.note, receipt_path: t.receipt_path, recurring_bill_id: t.recurring_bill_id,
       });
@@ -432,12 +436,13 @@
   function txRow(t) {
     const c = cat(t.category_id);
     const who = member(t.paid_by);
-    const sub = [c ? c.name : '', who ? who.display_name : '', methodLabel(t.payment_method)].filter(Boolean).join(' · ');
-    const income = t.kind === 'income';
+    const refund = t.kind === 'expense' && +t.amount < 0;
+    const sub = [refund ? 'Refund' : '', c ? c.name : '', who ? who.display_name : '', methodLabel(t.payment_method)].filter(Boolean).join(' · ');
+    const income = t.kind === 'income' || refund;
     return '<button class="row" data-act="openTx" data-id="' + t.id + '">' +
       '<span class="ico' + (income ? ' in' : '') + '">' + svg(catIcon(c), 18) + '</span>' +
       '<span class="grow"><span class="t">' + esc(t.merchant || (c ? c.name : 'Entry')) + (t.receipt_path ? ' <span class="muted">' + svg('clip', 13) + '</span>' : '') + (t.note ? ' <span class="muted">' + svg('note', 13) + '</span>' : '') + '</span><span class="s">' + esc(sub) + '</span></span>' +
-      '<span class="amt' + (income ? ' in' : '') + '">' + (income ? eur(+t.amount, { sign: true }) : eur(+t.amount)) + '</span></button>';
+      '<span class="amt' + (income ? ' in' : '') + '">' + (income ? eur(Math.abs(t.amount), { sign: true }) : eur(+t.amount)) + '</span></button>';
   }
 
   function viewHome() {
@@ -494,6 +499,7 @@
   function viewAdd() {
     const f = S.form;
     const income = f.kind === 'income';
+    const plus = income || f.refund;
     const amtDisplay = f.amountStr ? f.amountStr.replace('.', ',') : '0';
     const dateLabel = f.occurred_on === todayISO() ? 'Today' : f.occurred_on === addDays(todayISO(), -1) ? 'Yesterday' : fmtDate(f.occurred_on);
     const people = membersOrdered();
@@ -507,7 +513,7 @@
       '<div class="seg round" role="group" aria-label="Type"><button data-act="kind" data-k="expense" aria-pressed="' + !income + '">Expense</button><button data-act="kind" data-k="income" aria-pressed="' + income + '">Income</button></div>' +
       '<label class="date-pill">' + svg('cal', 16) + '<span>' + esc(dateLabel) + '</span><input id="f-date" type="date" aria-label="Date" value="' + f.occurred_on + '" max="' + addDays(todayISO(), 400) + '" data-model="form.occurred_on" data-rerender></label>' +
       '</header>' +
-      '<div class="amount' + (!f.amountStr ? ' empty-amt' : income ? ' in' : '') + '" aria-live="polite">' + (income && f.amountStr ? '+' : '') + esc(amtDisplay) + ' €</div>' +
+      '<div class="amount' + (!f.amountStr ? ' empty-amt' : plus ? ' in' : '') + '" aria-live="polite">' + (plus && f.amountStr ? '+' : '') + esc(amtDisplay) + ' €</div>' +
       (S.route === 'edit'
         ? (f.receipt_path ? '<button class="scan-link" data-act="viewReceipt" data-path="' + esc(f.receipt_path) + '">' + svg('clip', 18) + 'View receipt photo</button>' : '')
         : !income ? '<a class="scan-link" href="#/scan">' + svg('camera', 20) + 'Take a photo of the receipt</a>' : '<div class="hint">Money coming in: salary, refunds, gifts…</div>') +
@@ -516,10 +522,11 @@
       '<input class="input" id="f-merchant" type="text" autocomplete="off" maxlength="80" placeholder="' + (income ? 'e.g. October salary' : 'Shop or description, e.g. Mercadona') + '" aria-label="' + (income ? 'Description' : 'Shop or description') + '" value="' + esc(f.merchant) + '" data-model="form.merchant" data-after="merchantTyped">' +
       '<div class="cat-chips" role="group" aria-label="Category">' + cats.map((c) => '<button class="chip' + (income ? ' income' : '') + '" data-act="pickCat" data-id="' + c.id + '" aria-pressed="' + (f.category_id === c.id) + '">' + svg(catIcon(c), 16) + esc(c.name) + '</button>').join('') + '</div>' +
       '<div class="chips" role="group" aria-label="Payment method">' + METHODS.map((m) => '<button class="chip sm" data-act="method" data-m="' + m[0] + '" aria-pressed="' + (f.payment_method === m[0]) + '">' + svg(m[2], 15) + m[1] + '</button>').join('') +
+      (income ? '' : '<button class="chip sm" data-act="toggleRefund" aria-pressed="' + !!f.refund + '">' + svg('repeat', 15) + 'Refund</button>') +
       (f.showNote ? '' : '<button class="chip sm" data-act="showNote">' + svg('note', 15) + 'Add note</button>') + '</div>' +
       (f.showNote ? '<input class="input" id="f-note" type="text" maxlength="500" placeholder="Note (optional)" aria-label="Note" value="' + esc(f.note) + '" data-model="form.note">' : '') +
       '<div class="keypad">' + keys.map((k) => '<button data-act="key" data-k="' + k + '" aria-label="' + (k === 'del' ? 'Delete' : k === '.' ? 'Decimal comma' : k) + '">' + (k === 'del' ? '⌫' : k === '.' ? ',' : k) + '</button>').join('') + '</div>' +
-      '<button class="btn' + (income ? ' income' : '') + '" data-act="saveTx"' + (S.busy ? ' disabled' : '') + '>' + svg('check', 20, 2.5) + (S.busy ? 'Saving…' : f.id ? 'Save changes' : income ? 'Save income' : 'Save expense') + '</button>' +
+      '<button class="btn' + (income ? ' income' : '') + '" data-act="saveTx"' + (S.busy ? ' disabled' : '') + '>' + svg('check', 20, 2.5) + (S.busy ? 'Saving…' : f.id ? 'Save changes' : income ? 'Save income' : f.refund ? 'Save refund' : 'Save expense') + '</button>' +
       (f.id ? '<button class="btn danger" data-act="deleteTx">' + svg('trash', 18) + 'Delete</button>' : '') +
       '</main>';
   }
@@ -844,7 +851,7 @@
     const rows = await api().select('transactions', { gte: { occurred_on: from }, lte: { occurred_on: to }, order: [['occurred_on', true], ['created_at', true]] });
     if (!rows.length) { toast('No entries in those dates.'); return; }
     const head = ['Date', 'Type', 'Category', 'Shop / description', 'Amount (€)', 'Payment method', 'Paid by', 'Added by', 'Note', 'Receipt photo'];
-    const data = rows.map((t) => [t.occurred_on, t.kind === 'income' ? 'Income' : 'Expense', (cat(t.category_id) || {}).name || '', t.merchant || '',
+    const data = rows.map((t) => [t.occurred_on, t.kind === 'income' ? 'Income' : +t.amount < 0 ? 'Refund' : 'Expense', (cat(t.category_id) || {}).name || '', t.merchant || '',
       t.kind === 'income' ? +t.amount : -t.amount, methodLabel(t.payment_method), (member(t.paid_by) || {}).display_name || '', (member(t.created_by) || {}).display_name || '', t.note || '', t.receipt_path ? 'Yes' : 'No']);
     const name = 'budget_' + from + '_' + to;
     if (format === 'csv') {
@@ -974,6 +981,7 @@
       const f = S.form;
       if (f.kind === d.k) return;
       f.kind = d.k;
+      f.refund = false;
       f.category_id = null;
       f.catTouched = false;
       f.payment_method = d.k === 'income' ? 'transfer' : 'card';
@@ -999,6 +1007,7 @@
     selectCat(d, el) { S.form.category_id = el.value || null; S.form.catTouched = true; },
     method(d) { S.form.payment_method = d.m; render(); },
     showNote() { S.form.showNote = true; render(); const el = document.getElementById('f-note'); if (el) el.focus(); },
+    toggleRefund() { S.form.refund = !S.form.refund; render(); },
     merchantTyped() {
       const f = S.form;
       if (f.catTouched || f.kind !== 'expense') return;
@@ -1018,8 +1027,9 @@
           receiptPath = f.occurred_on.slice(0, 4) + '/' + f.occurred_on.slice(5, 7) + '/' + uuid() + '.jpg';
           await api().upload(receiptPath, S.scan.photo);
         }
+        const signed = f.kind === 'expense' && f.refund ? -amount : amount;
         const row = {
-          kind: f.kind, amount, occurred_on: f.occurred_on, merchant: f.merchant.trim() || null, category_id: f.category_id,
+          kind: f.kind, amount: signed, occurred_on: f.occurred_on, merchant: f.merchant.trim() || null, category_id: f.category_id,
           payment_method: f.payment_method || null, paid_by: f.paid_by, note: (f.note || '').trim() || null, receipt_path: receiptPath || null,
         };
         try {
@@ -1029,10 +1039,10 @@
           if (receiptPath && receiptPath !== f.receipt_path) api().removeFiles([receiptPath]).catch(() => {});
           throw e;
         }
-        if (f.kind === 'expense') await learnRule(row.merchant, row.category_id);
+        if (f.kind === 'expense' && !f.refund) await learnRule(row.merchant, row.category_id);
         if (monthOf(f.occurred_on) !== S.month) S.month = monthOf(f.occurred_on);
         await refresh();
-        toast((f.id ? 'Saved · ' : 'Added · ') + eur(amount) + (row.merchant ? ' · ' + row.merchant : ''));
+        toast((f.id ? 'Saved · ' : f.refund ? 'Refund added · ' : 'Added · ') + eur(amount) + (row.merchant ? ' · ' + row.merchant : ''));
         S.busy = false;
         go('#/' + (S.lastMain || 'home'));
       });
