@@ -179,7 +179,7 @@
     members: [], cats: [], bills: [], goals: [], contribs: [], settings: { monthly_savings_target: 0 }, rules: [], budgetRows: [],
     month: monthOf(todayISO()), txs: [], totals: [],
     route: 'home', params: {}, sheet: null, form: null, scan: null, toast: null,
-    hist: { who: 'all', q: '', search: false }, showAllCats: false, budgetScope: 'forward',
+    hist: { who: 'all', q: '', search: false }, budgetScope: 'forward',
     exp: { from: new Date().getFullYear() + '-01-01', to: todayISO() },
     login: { email: '', password: '', err: '', busy: false }, busy: false,
   };
@@ -471,13 +471,11 @@
       const budget = budgetFor(c.id, S.month);
       return { c, spent: st.spentBy[c.id] || 0, budget, fixed: isFixedCat(c.id, budget) };
     })
-      .filter((x) => x.spent > 0 || x.budget > 0)
-      // Day-to-day spending first (most used first), fixed costs after.
-      .sort((a, b) => (a.fixed - b.fixed) || ((b.budget ? b.spent / b.budget : 2) - (a.budget ? a.spent / a.budget : 2)) || b.spent - a.spent);
-    const shown = S.showAllCats ? cats : cats.slice(0, 4);
+      // Stable order so cards don't move: day-to-day categories first, fixed costs after.
+      .sort((a, b) => (a.fixed - b.fixed) || (a.c.sort_order - b.c.sort_order));
     const catHtml = '<section class="section" aria-labelledby="cat-h"><div class="section-head"><h2 id="cat-h">By category</h2>' +
-      (cats.length > 4 ? '<button class="link-btn" data-act="toggleCats">' + (S.showAllCats ? 'Show less' : 'See all ' + cats.length) + '</button>' : '') + '</div>' +
-      '<div class="cat-grid">' + shown.map((x) => catCard(x.c, x.spent, x.budget)).join('') + '</div></section>';
+      '<a class="link-btn" href="#/budgets" style="text-decoration:none">Edit budgets</a></div>' +
+      '<div class="cat-grid">' + cats.map((x) => catCard(x.c, x.spent, x.budget)).join('') + '</div></section>';
 
     const recent = S.txs.slice(0, 6);
     const recentHtml = '<section class="section" aria-labelledby="recent-h"><div class="section-head"><h2 id="recent-h">Recent</h2><a class="link-btn" href="#/history" style="text-decoration:none">History</a></div>' +
@@ -929,7 +927,6 @@
       render();
     },
     async setMonth(d) { S.month = d.m; await loadMonth().catch((e) => toast(errMsg(e), true)); render(); },
-    toggleCats() { S.showAllCats = !S.showAllCats; render(); },
     catHistory(d) { S.hist.cat = d.id; go('#/history'); },
     clearCatFilter() { S.hist.cat = null; render(); },
     openTx(d) { go('#/edit/' + d.id); },
