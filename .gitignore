@@ -1,0 +1,8 @@
+# Private: never publish (household data, emails, setup notes)
+supabase/
+SETUP-PLAN.md
+demo.js
+# Local development only
+tools/
+.claude/
+.DS_Store
