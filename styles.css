@@ -330,3 +330,22 @@ button.row { cursor: pointer; }
   .home-grid { display: grid; }
   .wide-2 { display: grid; }
 }
+
+/* Charts with a y-axis scale */
+.chart { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; }
+.yaxis { position: relative; width: 38px; margin: 22px 0 18px; }
+.yaxis span { position: absolute; right: 0; transform: translateY(50%); font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plot { position: relative; }
+.plot .grid { position: absolute; left: 0; right: 0; top: 22px; bottom: 18px; pointer-events: none; }
+.plot .grid i { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
+.plot .trend { position: relative; height: 180px; padding-top: 22px; }
+.trend .bars i.wide { width: 56%; max-width: 22px; }
+.bar-val { position: absolute; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 10px; font-weight: 700; color: var(--ink); white-space: nowrap; background: var(--card); padding: 0 3px; border-radius: 4px; z-index: 1; }
+.big { white-space: nowrap; }
+.total-row { flex-wrap: wrap; }
+.total-row .big { font-size: clamp(26px, 8vw, 34px); }
+.plot .trend button { line-height: 14px; }
+.stat-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.stat-pair > div { background: var(--card-2); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stat-pair span { font-size: 12px; color: var(--muted); }
+.stat-pair strong { font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }

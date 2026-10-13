@@ -586,6 +586,33 @@
   const last12 = () => { const out = []; for (let i = 11; i >= 0; i--) out.push(addMonths(S.month, -i)); return out; };
   const monLetter = (m) => MON[+m.slice(5, 7) - 1].slice(0, 1);
 
+  // Rounds a chart's top value up to a readable number (e.g. 7.380 -> 8.000).
+  function niceMax(v) {
+    if (!(v > 0)) return 100;
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const k of [1, 1.2, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10]) if (k * p >= v) return k * p;
+    return 10 * p;
+  }
+  const compact = (v) => (v >= 1000 ? NF2.format(v / 1000).replace(/,?0+$/, '') + 'k' : NF0.format(v)) + ' €';
+
+  // 12-month bar chart with a labelled scale. point(m) -> { label, value, bars: [{v, cls}], mark }
+  function barChart(months, rawMax, point) {
+    const max = niceMax(rawMax);
+    const ticks = [0, 0.25, 0.5, 0.75, 1];
+    const h = (v) => ((Math.max(0, v) / max) * 100).toFixed(1) + '%';
+    return '<div class="chart"><div class="yaxis" aria-hidden="true">' + ticks.map((t) => '<span style="bottom:' + t * 100 + '%">' + compact(max * t) + '</span>').join('') + '</div>' +
+      '<div class="plot"><div class="grid" aria-hidden="true">' + ticks.map((t) => '<i style="bottom:' + t * 100 + '%"></i>').join('') + '</div>' +
+      '<div class="trend">' + months.map((m) => {
+        const p = point(m);
+        const sel = m === S.month;
+        return '<button data-act="setMonth" data-m="' + m + '" aria-pressed="' + sel + '" aria-label="' + esc(p.label) + '"><span class="bars">' +
+          p.bars.map((b) => '<i class="' + b.cls + '" style="height:' + h(b.v) + '"></i>').join('') +
+          (p.mark ? '<b class="budget-mark" style="bottom:' + h(p.mark) + '"></b>' : '') +
+          (sel && p.value ? '<em class="bar-val" style="bottom:calc(' + h(Math.max(p.mark || 0, ...p.bars.map((x) => x.v))) + ' + 4px)">' + compact(p.value) + '</em>' : '') +
+          '</span>' + monLetter(m) + '</button>';
+      }).join('') + '</div></div></div>';
+  }
+
   function dayGroups(list) {
     const days = [];
     for (const t of list) {
@@ -626,15 +653,16 @@
     const withData = months.filter((m) => byMonth[m] && byMonth[m].expense && m < S.month).slice(-3);
     const avg = withData.length ? withData.reduce((s, m) => s + byMonth[m].expense, 0) / withData.length : 0;
 
-    const summary = '<section class="total-row" aria-label="' + esc(monthLabel(S.month)) + ' summary"><div style="display:flex;flex-direction:column;gap:2px"><span class="muted" style="font-weight:600;font-size:14px">Spent in ' + esc(monthLabel(S.month)) + '</span><span class="big">' + eur(cur.expense, { dec: false }) + '</span></div>' +
-      '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:13px" class="muted"><span>Income <strong class="num" style="color:var(--sky)">' + eur(cur.income, { dec: false }) + '</strong></span>' +
-      (avg ? '<span>Avg of previous ' + withData.length + (withData.length === 1 ? ' month' : ' months') + ' <strong class="num" style="color:var(--ink)">' + eur(avg, { dec: false }) + '</strong></span>' : '') + '</div></section>';
+    const summary = '<section class="total-card" aria-label="' + esc(monthLabel(S.month)) + ' summary"><span class="muted" style="font-weight:600">Spent in ' + esc(monthLabel(S.month)) + '</span><span class="big">' + eur(cur.expense, { dec: false }) + '</span>' +
+      '<div class="stat-pair"><div><span>Income</span><strong style="color:var(--sky)">' + eur(cur.income, { dec: false }) + '</strong></div>' +
+      '<div><span>' + (avg ? 'Avg of previous ' + withData.length + (withData.length === 1 ? ' month' : ' months') : 'No earlier months') + '</span><strong>' + (avg ? eur(avg, { dec: false }) : '—') + '</strong></div></div></section>';
 
     const trend = '<section class="card pad section" aria-labelledby="trend-h"><div class="section-head"><h2 id="trend-h">Last 12 months</h2><div class="legend"><span>Spent</span><span class="inc">Income</span></div></div>' +
-      '<div class="trend">' + months.map((m) => {
+      barChart(months, max, (m) => {
         const o = byMonth[m] || { income: 0, expense: 0 };
-        return '<button data-act="setMonth" data-m="' + m + '" aria-pressed="' + (m === S.month) + '" aria-label="' + monthLabel(m, true) + ': spent ' + eur(o.expense) + ', income ' + eur(o.income) + '"><span class="bars"><i class="out" style="height:' + ((Math.max(0, o.expense) / max) * 100).toFixed(1) + '%"></i><i class="inc" style="height:' + ((o.income / max) * 100).toFixed(1) + '%"></i></span>' + monLetter(m) + '</button>';
-      }).join('') + '</div></section>';
+        return { label: monthLabel(m, true) + ': spent ' + eur(o.expense) + ', income ' + eur(o.income), value: o.expense,
+          bars: [{ v: o.expense, cls: 'out' }, { v: o.income, cls: 'inc' }] };
+      }) + '</section>';
 
     const rows = Object.keys(cur.byCat).map((id) => ({ c: cat(id), v: cur.byCat[id], p: prev.byCat[id] || 0 })).filter((x) => x.c && Math.abs(x.v) >= 0.005).sort((a, b) => b.v - a.v);
     const maxC = Math.max(1, ...rows.map((r) => r.v));
@@ -676,13 +704,11 @@
       (avg ? '<span>Avg of previous ' + withData.length + (withData.length === 1 ? ' month' : ' months') + ': <strong class="num" style="color:var(--ink)">' + eur(avg, { dec: false }) + '</strong></span>' : '') + '</div></section>';
 
     const trend = '<section class="card pad section" aria-labelledby="ctrend-h"><div class="section-head"><h2 id="ctrend-h">Last 12 months</h2><div class="legend"><span>Spent</span><span class="budget">Budget</span></div></div>' +
-      '<div class="trend">' + months.map((m) => {
+      barChart(months, max, (m) => {
         const v = val(m), b = budgetFor(c.id, m);
-        const isOver = b > 0 && v > b + 0.005;
-        return '<button data-act="setMonth" data-m="' + m + '" aria-pressed="' + (m === S.month) + '" aria-label="' + monthLabel(m, true) + ': spent ' + eur(v) + (b ? ' of ' + eur(b) : '') + '"><span class="bars">' +
-          '<i class="out' + (isOver ? ' over' : '') + '" style="height:' + ((Math.max(0, v) / max) * 100).toFixed(1) + '%;width:56%;max-width:22px"></i>' +
-          (b > 0 && m >= firstData ? '<b class="budget-mark" style="bottom:' + ((b / max) * 100).toFixed(1) + '%"></b>' : '') + '</span>' + monLetter(m) + '</button>';
-      }).join('') + '</div></section>';
+        return { label: monthLabel(m, true) + ': spent ' + eur(v) + (b ? ' of ' + eur(b) : ''), value: v,
+          bars: [{ v, cls: 'out wide' + (b > 0 && v > b + 0.005 ? ' over' : '') }], mark: b > 0 && m >= firstData ? b : null };
+      }) + '</section>';
 
     const list = S.txs.filter((t) => t.category_id === c.id);
     const listHtml = '<section class="section" aria-labelledby="centries-h"><div class="section-head"><h2 id="centries-h">Entries</h2><span class="muted" style="font-size:13px">' + list.length + (list.length === 1 ? ' entry' : ' entries') + '</span></div>' +
