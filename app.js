@@ -132,6 +132,7 @@
     list: '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>',
     coins: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
     pie: '<path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>',
+    chart: '<path d="M3 20h18"/><path d="M6 16v-5M11 16V6M16 16v-8M21 16v-3"/>',
     photos: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-9 9"/>',
     keyboard: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
@@ -281,7 +282,7 @@
     const [path, query] = h.split('?');
     const parts = path.split('/');
     const params = Object.fromEntries(new URLSearchParams(query || ''));
-    if (parts[0] === 'edit') params.id = parts[1];
+    if (parts[0] === 'edit' || parts[0] === 'category') params.id = parts[1];
     return { route: parts[0] || 'home', params };
   }
 
@@ -294,16 +295,19 @@
   }
 
   function reloadIfIdle() {
-    if (S.updateReady && !S.sheet && !S.busy && ['home', 'history', 'savings', 'budgets'].includes(S.route)) location.reload();
+    if (S.updateReady && !S.sheet && !S.busy && ['home', 'history', 'trends', 'savings', 'budgets'].includes(S.route)) location.reload();
   }
 
   function onRoute() {
     const { route, params } = parseHash();
-    if (['home', 'history', 'savings', 'budgets'].includes(route)) S.lastMain = route;
+    if (['home', 'history', 'trends', 'savings', 'budgets'].includes(route)) S.lastMain = route;
     S.route = route;
     S.params = params;
     S.sheet = S.recovery ? { type: 'password', recovery: true } : null;
-    if (route === 'add') S.form = newForm(params.kind === 'income' ? 'income' : 'expense');
+    if (route === 'add') {
+      S.form = newForm(params.kind === 'income' ? 'income' : 'expense');
+      if (params.cat && cat(params.cat)) Object.assign(S.form, { category_id: params.cat, catTouched: true, kind: cat(params.cat).kind });
+    }
     if (route === 'edit') {
       const t = S.txs.find((x) => x.id === params.id);
       if (!t) { location.hash = '#/history'; return; }
@@ -356,7 +360,7 @@
     else if (!S.ready) html = '<div class="boot">Loading…</div>';
     else if (!S.me) html = viewNotMember();
     else {
-      const views = { home: viewHome, history: viewHistory, savings: viewSavings, budgets: viewBudgets, add: viewAdd, edit: viewAdd, scan: viewScan };
+      const views = { home: viewHome, history: viewHistory, trends: viewTrends, category: viewCategory, savings: viewSavings, budgets: viewBudgets, add: viewAdd, edit: viewAdd, scan: viewScan };
       html = (views[S.route] || viewHome)();
     }
     app.innerHTML = html + viewSheet();
@@ -369,8 +373,8 @@
     }
   }
 
-  const navItem = (route, icon, label) => '<a href="#/' + route + '"' + (S.route === route ? ' aria-current="page"' : '') + '>' + svg(icon, 24) + label + '</a>';
-  const nav = () => '<nav class="nav" aria-label="Main">' + navItem('home', 'home', 'Home') + navItem('history', 'list', 'History') + navItem('savings', 'coins', 'Savings') + navItem('budgets', 'pie', 'Budgets') + '</nav>';
+  const navItem = (route, icon, label) => '<a href="#/' + route + '"' + ((S.route === 'category' ? S.lastMain : S.route) === route ? ' aria-current="page"' : '') + '>' + svg(icon, 24) + label + '</a>';
+  const nav = () => '<nav class="nav" aria-label="Main">' + navItem('home', 'home', 'Home') + navItem('history', 'list', 'History') + navItem('trends', 'chart', 'Trends') + navItem('savings', 'coins', 'Savings') + navItem('budgets', 'pie', 'Budgets') + '</nav>';
   const fabs = () => '<div class="fab-row"><a class="fab" href="#/add">' + svg('plus', 22, 2.5) + 'Add</a><a class="fab scan" href="#/scan">' + svg('camera', 22) + 'Scan receipt</a></div>';
   const monthNav = (titleTag) => {
     const cur = monthOf(todayISO());
@@ -427,7 +431,7 @@
     if (!warn) val = '<strong>' + eur(spent, { smart: true }) + '</strong> of ' + eur(budget, { smart: true });
     else if (left >= 0) val = '<strong>' + eur(left, { smart: true }) + '</strong> left of ' + eur(budget, { smart: true });
     else val = '<strong>' + eur(-left, { smart: true }) + '</strong> over ' + (budget > 0 ? eur(budget, { smart: true }) : 'budget');
-    return '<button class="cat-card' + (warn ? ' warn' : '') + '" data-act="catHistory" data-id="' + c.id + '" aria-label="' + esc(c.name + ': ' + eur(spent) + ' of ' + eur(budget) + ' — show entries') + '">' +
+    return '<button class="cat-card' + (warn ? ' warn' : '') + '" data-act="openCategory" data-id="' + c.id + '" aria-label="' + esc(c.name + ': ' + eur(spent) + ' of ' + eur(budget) + ' — open category') + '">' +
       '<div class="head"><span class="ico sm' + (warn ? ' warn' : '') + '">' + svg(catIcon(c), 17) + '</span><span class="name">' + esc(c.name) + '</span></div>' +
       '<div class="val">' + val + '</div>' +
       '<div class="track"><div style="width:' + Math.min(100, pct).toFixed(1) + '%"></div></div></button>';
@@ -578,35 +582,11 @@
       '<button class="btn ghost" data-act="retake">Retake photo</button></div></main>';
   }
 
-  // ---------- History ----------
-  function viewHistory() {
-    const H = S.hist;
-    const people = membersOrdered();
-    const byMonth = totalsByMonth();
-    // 12-month trend ending at the selected month
-    const months = [];
-    for (let i = 11; i >= 0; i--) months.push(addMonths(S.month, -i));
-    const max = Math.max(1, ...months.map((m) => Math.max((byMonth[m] || {}).income || 0, (byMonth[m] || {}).expense || 0)));
-    const trend = '<section class="card pad section" aria-labelledby="trend-h"><div class="section-head"><h2 id="trend-h">Last 12 months</h2><div class="legend"><span>Spent</span><span class="inc">Income</span></div></div>' +
-      '<div class="trend">' + months.map((m) => {
-        const o = byMonth[m] || { income: 0, expense: 0 };
-        return '<button data-act="setMonth" data-m="' + m + '" aria-pressed="' + (m === S.month) + '" aria-label="' + monthLabel(m, true) + ': spent ' + eur(o.expense) + ', income ' + eur(o.income) + '"><span class="bars"><i class="out" style="height:' + ((o.expense / max) * 100).toFixed(1) + '%"></i><i class="inc" style="height:' + ((o.income / max) * 100).toFixed(1) + '%"></i></span>' + MON[+m.slice(5, 7) - 1].slice(0, 1) + '</button>';
-      }).join('') + '</div></section>';
+  // ---------- Shared pieces for History, Trends and category pages ----------
+  const last12 = () => { const out = []; for (let i = 11; i >= 0; i--) out.push(addMonths(S.month, -i)); return out; };
+  const monLetter = (m) => MON[+m.slice(5, 7) - 1].slice(0, 1);
 
-    const cur = byMonth[S.month] || { byCat: {}, expense: 0 };
-    const prev = byMonth[addMonths(S.month, -1)] || { byCat: {} };
-    const rows = Object.keys(cur.byCat).map((id) => ({ c: cat(id), v: cur.byCat[id], p: prev.byCat[id] || 0 })).filter((x) => x.c).sort((a, b) => b.v - a.v);
-    const maxC = Math.max(1, ...rows.map((r) => r.v));
-    const breakdown = rows.length ? '<section class="card pad section breakdown" aria-labelledby="bd-h"><div class="section-head"><h2 id="bd-h">Spending by category</h2><span class="muted num" style="font-weight:700">' + eur(cur.expense) + '</span></div><div>' +
-      rows.map((r) => {
-        const delta = r.p > 0 ? Math.round(((r.v - r.p) / r.p) * 100) : null;
-        return '<button class="row" data-act="catHistory" data-id="' + r.c.id + '" style="padding:8px 0"><span class="dot" style="background:' + esc(r.c.color) + '"></span><span class="grow"><span class="t" style="font-size:14px">' + esc(r.c.name) + '</span><span class="hbar"><span style="display:block;height:100%;width:' + ((r.v / maxC) * 100).toFixed(1) + '%;background:' + esc(r.c.color) + '"></span></span></span>' +
-          '<span style="display:flex;flex-direction:column;align-items:flex-end"><span class="amt" style="font-size:14px">' + eur(r.v) + '</span>' + (delta !== null && delta !== 0 ? '<span class="delta ' + (delta > 0 ? 'up' : 'down') + '">' + (delta > 0 ? '▲ ' : '▼ ') + Math.abs(delta) + '% vs ' + MON[+addMonths(S.month, -1).slice(5, 7) - 1] + '</span>' : '') + '</span></button>';
-      }).join('') + '</div></section>' : '';
-
-    const q = Receipt.norm(H.q).trim();
-    const list = S.txs.filter((t) => (H.who === 'all' || t.paid_by === H.who) && (!H.cat || t.category_id === H.cat) &&
-      (!q || Receipt.norm([t.merchant, t.note, (cat(t.category_id) || {}).name].join(' ')).includes(q)));
+  function dayGroups(list) {
     const days = [];
     for (const t of list) {
       let d = days[days.length - 1];
@@ -614,8 +594,17 @@
       d.items.push(t);
       d.total += t.kind === 'income' ? +t.amount : -t.amount;
     }
-    const catFilter = H.cat && cat(H.cat) ? '<div class="chips"><button class="chip" aria-pressed="true" data-act="clearCatFilter">' + esc(cat(H.cat).name) + ' ' + svg('close', 14, 2.5) + '</button></div>' : '';
-    const listHtml = days.length ? days.map((d) => '<section class="section" style="gap:6px"><div class="day-head"><span>' + esc(dayLabel(d.date)) + '</span><span class="num">' + eur(round2(d.total), { sign: true }) + '</span></div><div class="list">' + d.items.map(txRow).join('') + '</div></section>').join('')
+    return days.map((d) => '<section class="section" style="gap:6px"><div class="day-head"><span>' + esc(dayLabel(d.date)) + '</span><span class="num">' + eur(round2(d.total), { sign: true }) + '</span></div><div class="list">' + d.items.map(txRow).join('') + '</div></section>').join('');
+  }
+
+  // ---------- History: every entry of the month ----------
+  function viewHistory() {
+    const H = S.hist;
+    const people = membersOrdered();
+    const q = Receipt.norm(H.q).trim();
+    const list = S.txs.filter((t) => (H.who === 'all' || t.paid_by === H.who) &&
+      (!q || Receipt.norm([t.merchant, t.note, (cat(t.category_id) || {}).name].join(' ')).includes(q)));
+    const listHtml = list.length ? dayGroups(list)
       : '<div class="card empty">' + (S.txs.length ? 'Nothing matches.' : 'No entries in ' + esc(monthLabel(S.month)) + '.') + '</div>';
 
     return '<main class="screen"><header class="topbar"><h1 class="title">History</h1><button class="icon-btn filled" data-act="toggleSearch" aria-label="Search entries" aria-expanded="' + H.search + '">' + svg('search') + '</button></header>' +
@@ -623,8 +612,87 @@
       (H.search ? '<input class="input" id="h-q" type="search" placeholder="Search this month" value="' + esc(H.q) + '" data-model="hist.q" data-rerender aria-label="Search this month">' : '') +
       '<div class="filter-chips" role="group" aria-label="Filter by person">' +
       [['all', 'Both of us']].concat(people.map((m) => [m.user_id, m.display_name])).map((x) => '<button class="chip" data-act="histWho" data-id="' + x[0] + '" aria-pressed="' + (H.who === x[0]) + '">' + esc(x[1]) + '</button>').join('') + '</div>' +
-      catFilter +
-      '<div class="wide-2"><div>' + trend + breakdown + '</div><div>' + listHtml + '</div></div></main>' + fabs() + nav();
+      '<div class="narrow">' + listHtml + '</div></main>' + fabs() + nav();
+  }
+
+  // ---------- Trends: consolidated monthly trend + spending by category ----------
+  function viewTrends() {
+    const byMonth = totalsByMonth();
+    const months = last12();
+    const max = Math.max(1, ...months.map((m) => Math.max((byMonth[m] || {}).income || 0, (byMonth[m] || {}).expense || 0)));
+    const cur = byMonth[S.month] || { byCat: {}, expense: 0, income: 0 };
+    const prevM = addMonths(S.month, -1);
+    const prev = byMonth[prevM] || { byCat: {}, expense: 0 };
+    const withData = months.filter((m) => byMonth[m] && byMonth[m].expense && m < S.month).slice(-3);
+    const avg = withData.length ? withData.reduce((s, m) => s + byMonth[m].expense, 0) / withData.length : 0;
+
+    const summary = '<section class="total-row" aria-label="' + esc(monthLabel(S.month)) + ' summary"><div style="display:flex;flex-direction:column;gap:2px"><span class="muted" style="font-weight:600;font-size:14px">Spent in ' + esc(monthLabel(S.month)) + '</span><span class="big">' + eur(cur.expense, { dec: false }) + '</span></div>' +
+      '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:13px" class="muted"><span>Income <strong class="num" style="color:var(--sky)">' + eur(cur.income, { dec: false }) + '</strong></span>' +
+      (avg ? '<span>Avg of previous ' + withData.length + (withData.length === 1 ? ' month' : ' months') + ' <strong class="num" style="color:var(--ink)">' + eur(avg, { dec: false }) + '</strong></span>' : '') + '</div></section>';
+
+    const trend = '<section class="card pad section" aria-labelledby="trend-h"><div class="section-head"><h2 id="trend-h">Last 12 months</h2><div class="legend"><span>Spent</span><span class="inc">Income</span></div></div>' +
+      '<div class="trend">' + months.map((m) => {
+        const o = byMonth[m] || { income: 0, expense: 0 };
+        return '<button data-act="setMonth" data-m="' + m + '" aria-pressed="' + (m === S.month) + '" aria-label="' + monthLabel(m, true) + ': spent ' + eur(o.expense) + ', income ' + eur(o.income) + '"><span class="bars"><i class="out" style="height:' + ((Math.max(0, o.expense) / max) * 100).toFixed(1) + '%"></i><i class="inc" style="height:' + ((o.income / max) * 100).toFixed(1) + '%"></i></span>' + monLetter(m) + '</button>';
+      }).join('') + '</div></section>';
+
+    const rows = Object.keys(cur.byCat).map((id) => ({ c: cat(id), v: cur.byCat[id], p: prev.byCat[id] || 0 })).filter((x) => x.c && Math.abs(x.v) >= 0.005).sort((a, b) => b.v - a.v);
+    const maxC = Math.max(1, ...rows.map((r) => r.v));
+    const breakdown = '<section class="card pad section breakdown" aria-labelledby="bd-h"><div class="section-head"><h2 id="bd-h">Spending by category</h2><span class="muted num" style="font-weight:700">' + eur(cur.expense) + '</span></div>' +
+      (rows.length ? '<div>' + rows.map((r) => {
+        const delta = r.p > 0 ? Math.round(((r.v - r.p) / r.p) * 100) : null;
+        const share = cur.expense > 0 ? Math.round((r.v / cur.expense) * 100) : 0;
+        return '<button class="row" data-act="openCategory" data-id="' + r.c.id + '" style="padding:8px 0"><span class="dot" style="background:' + esc(r.c.color) + '"></span><span class="grow"><span class="t" style="font-size:14px">' + esc(r.c.name) + ' <span class="muted" style="font-weight:500">' + share + '%</span></span><span class="hbar"><span style="display:block;height:100%;width:' + ((Math.max(0, r.v) / maxC) * 100).toFixed(1) + '%;background:' + esc(r.c.color) + '"></span></span></span>' +
+          '<span style="display:flex;flex-direction:column;align-items:flex-end"><span class="amt" style="font-size:14px">' + eur(r.v) + '</span>' + (delta !== null && delta !== 0 ? '<span class="delta ' + (delta > 0 ? 'up' : 'down') + '">' + (delta > 0 ? '▲ ' : '▼ ') + Math.abs(delta) + '% vs ' + MON[+prevM.slice(5, 7) - 1] + '</span>' : '') + '</span>' + svg('right', 16) + '</button>';
+      }).join('') + '</div>' : '<div class="empty">No spending in ' + esc(monthLabel(S.month)) + '.</div>') + '</section>';
+
+    return '<main class="screen"><header class="topbar"><h1 class="title">Trends</h1>' + monthNav('h2').replace('class="title"', 'class="title" style="font-size:18px"') + '</header>' +
+      '<div class="wide-2"><div>' + summary + trend + '</div><div>' + breakdown + '</div></div></main>' + fabs() + nav();
+  }
+
+  // ---------- One category: its trend and its entries ----------
+  function viewCategory() {
+    const c = cat(S.params.id);
+    if (!c) return viewHome();
+    const byMonth = totalsByMonth();
+    const months = last12();
+    const val = (m) => ((byMonth[m] || { byCat: {} }).byCat[c.id] || 0);
+    const firstData = Object.keys(byMonth).sort()[0] || S.month;
+    const max = Math.max(1, ...months.map((m) => Math.max(val(m), budgetFor(c.id, m))));
+    const spent = round2(S.txs.filter((t) => t.category_id === c.id && t.kind === 'expense').reduce((s, t) => s + +t.amount, 0));
+    const budget = budgetFor(c.id, S.month);
+    const left = round2(budget - spent);
+    const pct = budget > 0 ? Math.min(100, (Math.max(0, spent) / budget) * 100) : 0;
+    const over = budget > 0 && spent > budget + 0.005;
+    const prevSpent = val(addMonths(S.month, -1));
+    const withData = months.filter((m) => m < S.month && val(m)).slice(-3);
+    const avg = withData.length ? withData.reduce((s, m) => s + val(m), 0) / withData.length : 0;
+
+    const summary = '<section class="total-card" aria-label="' + esc(monthLabel(S.month)) + '"><div class="section-head"><span class="muted" style="font-weight:600">' + esc(monthLabel(S.month)) + '</span>' +
+      (budget > 0 ? '<span class="' + (over ? 'over' : 'under') + ' num" style="font-size:14px">' + (over ? eur(-left) + ' over' : eur(left) + ' left') + '</span>' : '') + '</div>' +
+      '<span class="big">' + eur(spent) + '</span>' +
+      (budget > 0 ? '<div class="track" style="height:8px"><div style="width:' + pct.toFixed(1) + '%;' + (over ? 'background:var(--orange)' : '') + '"></div></div><span class="muted" style="font-size:13px">of ' + eur(budget, { smart: true }) + ' budget</span>' : '<span class="muted" style="font-size:13px">No budget set</span>') +
+      '<div class="muted" style="font-size:13px;display:flex;gap:14px;flex-wrap:wrap;margin-top:4px"><span>' + MONTHS[+addMonths(S.month, -1).slice(5, 7) - 1] + ': <strong class="num" style="color:var(--ink)">' + eur(prevSpent, { dec: false }) + '</strong></span>' +
+      (avg ? '<span>Avg of previous ' + withData.length + (withData.length === 1 ? ' month' : ' months') + ': <strong class="num" style="color:var(--ink)">' + eur(avg, { dec: false }) + '</strong></span>' : '') + '</div></section>';
+
+    const trend = '<section class="card pad section" aria-labelledby="ctrend-h"><div class="section-head"><h2 id="ctrend-h">Last 12 months</h2><div class="legend"><span>Spent</span><span class="budget">Budget</span></div></div>' +
+      '<div class="trend">' + months.map((m) => {
+        const v = val(m), b = budgetFor(c.id, m);
+        const isOver = b > 0 && v > b + 0.005;
+        return '<button data-act="setMonth" data-m="' + m + '" aria-pressed="' + (m === S.month) + '" aria-label="' + monthLabel(m, true) + ': spent ' + eur(v) + (b ? ' of ' + eur(b) : '') + '"><span class="bars">' +
+          '<i class="out' + (isOver ? ' over' : '') + '" style="height:' + ((Math.max(0, v) / max) * 100).toFixed(1) + '%;width:56%;max-width:22px"></i>' +
+          (b > 0 && m >= firstData ? '<b class="budget-mark" style="bottom:' + ((b / max) * 100).toFixed(1) + '%"></b>' : '') + '</span>' + monLetter(m) + '</button>';
+      }).join('') + '</div></section>';
+
+    const list = S.txs.filter((t) => t.category_id === c.id);
+    const listHtml = '<section class="section" aria-labelledby="centries-h"><div class="section-head"><h2 id="centries-h">Entries</h2><span class="muted" style="font-size:13px">' + list.length + (list.length === 1 ? ' entry' : ' entries') + '</span></div>' +
+      (list.length ? dayGroups(list) : '<div class="card empty">No ' + esc(c.name) + ' entries in ' + esc(monthLabel(S.month)) + '.</div>') + '</section>';
+
+    return '<main class="screen"><header class="topbar"><div class="month-nav"><button class="icon-btn filled" data-act="closeCategory" aria-label="Back">' + svg('left') + '</button>' +
+      '<span class="ico sm" style="margin-left:6px">' + svg(catIcon(c), 16) + '</span><h1 class="title" style="font-size:22px;margin-left:8px">' + esc(c.name) + '</h1></div></header>' +
+      '<div style="display:flex;justify-content:center;margin-top:-10px">' + monthNav('h2') + '</div>' +
+      '<div class="wide-2"><div>' + trend + summary + '</div><div>' + listHtml + '</div></div></main>' +
+      '<div class="fab-row"><a class="fab" href="#/add?cat=' + c.id + '">' + svg('plus', 22, 2.5) + 'Add</a><a class="fab scan" href="#/scan">' + svg('camera', 22) + 'Scan receipt</a></div>' + nav();
   }
 
   // ---------- Savings ----------
@@ -939,8 +1007,8 @@
       render();
     },
     async setMonth(d) { S.month = d.m; await loadMonth().catch((e) => toast(errMsg(e), true)); render(); },
-    catHistory(d) { S.hist.cat = d.id; go('#/history'); },
-    clearCatFilter() { S.hist.cat = null; render(); },
+    openCategory(d) { go('#/category/' + d.id); },
+    closeCategory() { go('#/' + (S.lastMain || 'home')); },
     openTx(d) { go('#/edit/' + d.id); },
     histWho(d) { S.hist.who = d.id; render(); },
     toggleSearch() { S.hist.search = !S.hist.search; if (!S.hist.search) S.hist.q = ''; render(); if (S.hist.search) { const el = document.getElementById('h-q'); if (el) el.focus(); } },

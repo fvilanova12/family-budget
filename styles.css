@@ -142,7 +142,7 @@ button.row { cursor: pointer; }
 .fab:hover { background: var(--lime-hover); color: var(--lime-ink); }
 .fab.scan { background: var(--violet); color: var(--violet-ink); }
 .fab.scan:hover { background: #D8CCFE; color: var(--violet-ink); }
-.nav { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: min(100%, 560px); height: calc(var(--nav-h) + var(--safe-b)); padding-bottom: var(--safe-b); background: var(--card); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); z-index: 30; }
+.nav { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: min(100%, 560px); height: calc(var(--nav-h) + var(--safe-b)); padding-bottom: var(--safe-b); background: var(--card); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); z-index: 30; }
 .nav a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-decoration: none; color: var(--muted); font-size: 12px; font-weight: 600; }
 .nav a[aria-current="page"] { color: var(--lime); font-weight: 700; }
 
@@ -247,6 +247,13 @@ button.row { cursor: pointer; }
 .trend .bars i { display: block; width: 42%; max-width: 12px; border-radius: 3px 3px 0 0; min-height: 2px; }
 .trend .bars i.out { background: var(--lime); }
 .trend .bars i.inc { background: var(--sky); opacity: 0.85; }
+.trend .bars { position: relative; }
+.trend .bars i.over { background: var(--orange); }
+.trend .budget-mark { position: absolute; left: 12%; right: 12%; height: 0; border-top: 2px dashed var(--muted); }
+.legend span.budget::before { background: none; border-top: 2px dashed var(--muted); height: 0; width: 12px; vertical-align: 3px; border-radius: 0; }
+.nav a { font-size: 11px; }
+.narrow { display: flex; flex-direction: column; gap: 20px; }
+@media (min-width: 960px) { .narrow { max-width: 680px; width: 100%; margin: 0 auto; } }
 .trend button[aria-pressed="true"] { color: var(--ink); }
 .trend button[aria-pressed="false"] .bars i.out { opacity: 0.55; }
 .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
