@@ -81,6 +81,7 @@
   const round2 = (n) => Math.round(n * 100) / 100;
   const NF2 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const NF0 = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
+  const NF3 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
   // European format: 1.234,56 €
   const eur = (n, opts) => {
     opts = opts || {};
@@ -160,6 +161,13 @@
     for (const [re, icon] of map) if (re.test(n)) return icon;
     return 'box';
   }
+
+  const isFuelCat = (c) => !!c && c.kind === 'expense' && catIcon(c) === 'car';
+  const fuelCat = () => expenseCats().find(isFuelCat);
+  // Litres + optional odometer, shown when the category is Transportation.
+  const fuelFields = (f, prefix) => isFuelCat(cat(f.category_id)) ? '<div class="grid-2">' +
+    '<label class="field" for="' + prefix + '-liters">Fuel litres<input class="input" id="' + prefix + '-liters" type="text" inputmode="decimal" placeholder="e.g. 32,15" value="' + esc(f.fuel_liters) + '" data-model="form.fuel_liters"></label>' +
+    '<label class="field" for="' + prefix + '-odo">Odometer km (optional)<input class="input" id="' + prefix + '-odo" type="text" inputmode="numeric" placeholder="e.g. 45210" value="' + esc(f.odometer) + '" data-model="form.odometer"></label></div>' : '';
 
   const METHODS = [['card', 'Card', 'card'], ['cash', 'Cash', 'cash'], ['transfer', 'Transfer', 'bank'], ['direct_debit', 'Direct debit', 'repeat']];
   const methodLabel = (m) => (METHODS.find((x) => x[0] === m) || [null, ''])[1];
@@ -258,6 +266,7 @@
     ]);
     S.txs = txs;
     S.totals = totals;
+    S.fuel = await api().select('transactions', { notnull: ['fuel_liters'], gte: { occurred_on: from }, order: [['occurred_on', true]] }).catch(() => []);
   }
 
   let reloadTimer = null;
@@ -290,7 +299,7 @@
     return {
       id: null, kind: kind || 'expense', amountStr: '', amountText: null, occurred_on: todayISO(), paid_by: S.me ? S.me.user_id : null,
       category_id: null, merchant: '', note: '', payment_method: kind === 'income' ? 'transfer' : 'card', catTouched: false,
-      showNote: false, receipt_path: null, recurring_bill_id: null, refund: false,
+      showNote: false, receipt_path: null, recurring_bill_id: null, refund: false, fuel_liters: '', odometer: '',
     };
   }
 
@@ -315,6 +324,7 @@
         id: t.id, kind: t.kind, refund: +t.amount < 0, amountStr: Number.isInteger(round2(Math.abs(t.amount))) ? String(round2(Math.abs(t.amount))) : round2(Math.abs(t.amount)).toFixed(2), occurred_on: t.occurred_on, paid_by: t.paid_by,
         category_id: t.category_id, merchant: t.merchant || '', note: t.note || '', payment_method: t.payment_method,
         catTouched: true, showNote: !!t.note, receipt_path: t.receipt_path, recurring_bill_id: t.recurring_bill_id,
+        fuel_liters: t.fuel_liters ? NF2.format(+t.fuel_liters) : '', odometer: t.odometer_km ? String(t.odometer_km) : '',
       });
     }
     if (route === 'scan') {
@@ -442,7 +452,7 @@
     const c = cat(t.category_id);
     const who = member(t.paid_by);
     const refund = t.kind === 'expense' && +t.amount < 0;
-    const sub = [refund ? 'Refund' : '', c ? c.name : '', who ? who.display_name : '', methodLabel(t.payment_method)].filter(Boolean).join(' · ');
+    const sub = [refund ? 'Refund' : '', c ? c.name : '', t.fuel_liters ? NF2.format(+t.fuel_liters) + ' L · ' + NF3.format(Math.abs(t.amount) / t.fuel_liters) + ' €/L' : '', who ? who.display_name : '', t.fuel_liters ? '' : methodLabel(t.payment_method)].filter(Boolean).join(' · ');
     const income = t.kind === 'income' || refund;
     return '<button class="row" data-act="openTx" data-id="' + t.id + '">' +
       '<span class="ico' + (income ? ' in' : '') + '">' + svg(catIcon(c), 18) + '</span>' +
@@ -530,6 +540,7 @@
       (income ? '' : '<button class="chip sm" data-act="toggleRefund" aria-pressed="' + !!f.refund + '">' + svg('repeat', 15) + 'Refund</button>') +
       (f.showNote ? '' : '<button class="chip sm" data-act="showNote">' + svg('note', 15) + 'Add note</button>') + '</div>' +
       (f.showNote ? '<input class="input" id="f-note" type="text" maxlength="500" placeholder="Note (optional)" aria-label="Note" value="' + esc(f.note) + '" data-model="form.note">' : '') +
+      (income ? '' : fuelFields(f, 'f')) +
       '<div class="keypad">' + keys.map((k) => '<button data-act="key" data-k="' + k + '" aria-label="' + (k === 'del' ? 'Delete' : k === '.' ? 'Decimal comma' : k) + '">' + (k === 'del' ? '⌫' : k === '.' ? ',' : k) + '</button>').join('') + '</div>' +
       '<button class="btn' + (income ? ' income' : '') + '" data-act="saveTx"' + (S.busy ? ' disabled' : '') + '>' + svg('check', 20, 2.5) + (S.busy ? 'Saving…' : f.id ? 'Save changes' : income ? 'Save income' : f.refund ? 'Save refund' : 'Save expense') + '</button>' +
       (f.id ? '<button class="btn danger" data-act="deleteTx">' + svg('trash', 18) + 'Delete</button>' : '') +
@@ -576,6 +587,7 @@
       '<label class="field" for="s-date">Date' + dateIn('s-date', 'form.occurred_on', f.occurred_on) + '</label></div>' +
       '<label class="field" for="s-cat">Category<select class="select" id="s-cat" data-change="selectCat">' + (f.category_id ? '' : '<option value="">Choose a category…</option>') +
       expenseCats().map((c) => '<option value="' + c.id + '"' + (f.category_id === c.id ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('') + '</select></label>' +
+      fuelFields(f, 's') +
       '<div class="seg" role="group" aria-label="Who paid">' + people.map((m) => '<button data-act="who" data-id="' + m.user_id + '" aria-pressed="' + (f.paid_by === m.user_id) + '">' + esc(m.display_name) + ' paid</button>').join('') + '</div>' +
       '<div class="chips" role="group" aria-label="Payment method">' + METHODS.map((m) => '<button class="chip sm" data-act="method" data-m="' + m[0] + '" aria-pressed="' + (f.payment_method === m[0]) + '">' + svg(m[2], 15) + m[1] + '</button>').join('') + '</div>' +
       '<input class="input" id="s-note" type="text" maxlength="500" placeholder="Note (optional)" aria-label="Note" value="' + esc(f.note) + '" data-model="form.note">' +
@@ -679,6 +691,43 @@
       '<div class="wide-2"><div>' + summary + trend + '</div><div>' + breakdown + '</div></div></main>' + fabs() + nav();
   }
 
+  // ---------- Fuel: litres, price per litre, consumption ----------
+  function fuelPanel() {
+    const fills = (S.fuel || []).filter((t) => +t.fuel_liters > 0 && +t.amount > 0);
+    const inMonth = (m) => fills.filter((t) => monthOf(t.occurred_on) === m);
+    const sum = (list, k) => list.reduce((s, t) => s + +t[k], 0);
+    const cur = inMonth(S.month), prev = inMonth(addMonths(S.month, -1));
+    const liters = sum(cur, 'fuel_liters'), euros = sum(cur, 'amount');
+    const prevLiters = sum(prev, 'fuel_liters');
+    const price = liters ? euros / liters : null;
+    // Consumption from fill-ups with an odometer reading (full-tank method:
+    // fuel bought after the first reading / km driven since it).
+    const withOdo = fills.filter((t) => t.odometer_km).sort((a, b) => a.odometer_km - b.odometer_km);
+    let cons = null;
+    if (withOdo.length >= 2) {
+      const km = withOdo[withOdo.length - 1].odometer_km - withOdo[0].odometer_km;
+      const after = withOdo.slice(1);
+      if (km > 0) cons = { l100: (sum(after, 'fuel_liters') / km) * 100, e100: (sum(after, 'amount') / km) * 100, km, n: withOdo.length };
+    }
+    let pace = '';
+    const today = todayISO();
+    if (S.month === monthOf(today) && euros > 0) {
+      const day = +today.slice(8, 10), days = +addDays(addMonths(S.month, 1), -1).slice(8, 10);
+      if (day >= 5) pace = '<span>At this pace: <strong class="num" style="color:var(--ink)">' + eur((euros / day) * days, { dec: false }) + '</strong> on fuel this month</span>';
+    }
+    const L = (v) => NF2.format(v).replace(/,00$/, '') + ' L';
+    const stat = (label, value, sub) => '<div><span>' + label + '</span><strong>' + value + '</strong>' + (sub ? '<span>' + sub + '</span>' : '') + '</div>';
+    return '<section class="total-card" aria-labelledby="fuel-h"><div class="section-head"><h2 id="fuel-h" style="font-size:17px">Fuel · ' + esc(monthLabel(S.month)) + '</h2><span class="muted" style="font-size:13px">' + cur.length + (cur.length === 1 ? ' fill-up' : ' fill-ups') + '</span></div>' +
+      (fills.length ? '<div class="stat-pair">' +
+        stat('Litres', liters ? L(liters) : '—', prevLiters ? MON[+addMonths(S.month, -1).slice(5, 7) - 1] + ': ' + L(prevLiters) : '') +
+        stat('Avg price', price ? NF3.format(price) + ' €/L' : '—', liters ? eur(euros) + ' on fuel' : '') +
+        stat('Consumption', cons ? NF2.format(cons.l100).replace(/0$/, '') + ' L/100 km' : '—', cons ? 'over ' + NF0.format(cons.km) + ' km' : 'needs 2 odometer readings') +
+        stat('Cost per 100 km', cons ? eur(cons.e100) : '—', cons ? cons.n + ' fill-ups' : '') +
+        '</div>' + (pace ? '<div class="muted" style="font-size:13px;margin-top:6px">' + pace + '</div>' : '')
+        : '<p class="muted" style="font-size:14px">No fill-ups with litres yet. Scan a fuel ticket, or type the litres when adding fuel. Add the odometer reading too to see consumption.</p>') +
+      '</section>';
+  }
+
   // ---------- One category: its trend and its entries ----------
   function viewCategory() {
     const c = cat(S.params.id);
@@ -704,6 +753,7 @@
       '<div class="muted" style="font-size:13px;display:flex;gap:14px;flex-wrap:wrap;margin-top:4px"><span>' + MONTHS[+addMonths(S.month, -1).slice(5, 7) - 1] + ': <strong class="num" style="color:var(--ink)">' + eur(prevSpent, { dec: false }) + '</strong></span>' +
       (avg ? '<span>Avg of previous ' + withData.length + (withData.length === 1 ? ' month' : ' months') + ': <strong class="num" style="color:var(--ink)">' + eur(avg, { dec: false }) + '</strong></span>' : '') + '</div></section>';
 
+    const fuelHtml = isFuelCat(c) ? fuelPanel() : '';
     const trend = '<section class="card pad section" aria-labelledby="ctrend-h"><div class="section-head"><h2 id="ctrend-h">Last 12 months</h2><div class="legend"><span>Spent</span><span class="budget">Budget</span></div></div>' +
       barChart(months, max, (m) => {
         const v = val(m), b = budgetFor(c.id, m);
@@ -718,7 +768,7 @@
     return '<main class="screen"><header class="topbar"><div class="month-nav"><button class="icon-btn filled" data-act="closeCategory" aria-label="Back">' + svg('left') + '</button>' +
       '<span class="ico sm" style="margin-left:6px">' + svg(catIcon(c), 16) + '</span><h1 class="title" style="font-size:22px;margin-left:8px">' + esc(c.name) + '</h1></div></header>' +
       '<div style="display:flex;justify-content:center;margin-top:-10px">' + monthNav('h2') + '</div>' +
-      '<div class="wide-2"><div>' + trend + summary + '</div><div>' + listHtml + '</div></div></main>' +
+      '<div class="wide-2"><div>' + trend + summary + fuelHtml + '</div><div>' + listHtml + '</div></div></main>' +
       '<div class="fab-row"><a class="fab" href="#/add?cat=' + c.id + '">' + svg('plus', 22, 2.5) + 'Add</a><a class="fab scan" href="#/scan">' + svg('camera', 22) + 'Scan receipt</a></div>' + nav();
   }
 
@@ -993,13 +1043,13 @@
     if (!from || !to || from > to) { toast('Check the dates.', true); return; }
     const rows = await api().select('transactions', { gte: { occurred_on: from }, lte: { occurred_on: to }, order: [['occurred_on', true], ['created_at', true]] });
     if (!rows.length) { toast('No entries in those dates.'); return; }
-    const head = ['Date', 'Type', 'Category', 'Shop / description', 'Amount (€)', 'Payment method', 'Paid by', 'Added by', 'Note', 'Receipt photo'];
+    const head = ['Date', 'Type', 'Category', 'Shop / description', 'Amount (€)', 'Payment method', 'Paid by', 'Added by', 'Note', 'Receipt photo', 'Fuel litres', 'Odometer km'];
     const data = rows.map((t) => [t.occurred_on, t.kind === 'income' ? 'Income' : +t.amount < 0 ? 'Refund' : 'Expense', (cat(t.category_id) || {}).name || '', t.merchant || '',
-      t.kind === 'income' ? +t.amount : -t.amount, methodLabel(t.payment_method), (member(t.paid_by) || {}).display_name || '', (member(t.created_by) || {}).display_name || '', t.note || '', t.receipt_path ? 'Yes' : 'No']);
+      t.kind === 'income' ? +t.amount : -t.amount, methodLabel(t.payment_method), (member(t.paid_by) || {}).display_name || '', (member(t.created_by) || {}).display_name || '', t.note || '', t.receipt_path ? 'Yes' : 'No', t.fuel_liters ? +t.fuel_liters : '', t.odometer_km || '']);
     const name = 'budget_' + from + '_' + to;
     if (format === 'csv') {
       const cell = (v) => { const s = String(v); return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-      const lines = [head].concat(data.map((r) => r.map((v, i) => (i === 0 ? fmtDate(v) : i === 4 ? NF2.format(v).replace(/\./g, '') : v)))).map((r) => r.map(cell).join(';'));
+      const lines = [head].concat(data.map((r) => r.map((v, i) => (i === 0 ? fmtDate(v) : i === 4 || (i === 10 && v !== '') ? NF2.format(v).replace(/\./g, '') : v)))).map((r) => r.map(cell).join(';'));
       await deliver(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), name + '.csv');
       return;
     }
@@ -1012,7 +1062,7 @@
       const d = ws[X.utils.encode_cell({ r: i, c: 0 })]; if (d) d.z = 'dd/mm/yyyy';
       const a = ws[X.utils.encode_cell({ r: i, c: 4 })]; if (a) a.z = '#,##0.00 "€";-#,##0.00 "€"';
     }
-    ws['!cols'] = [12, 10, 22, 30, 12, 14, 10, 10, 30, 8].map((w) => ({ wch: w }));
+    ws['!cols'] = [12, 10, 22, 30, 12, 14, 10, 10, 30, 8, 10, 12].map((w) => ({ wch: w }));
     X.utils.book_append_sheet(wb, ws, 'Entries');
     // Monthly summary by category
     const months = [...new Set(rows.map((t) => t.occurred_on.slice(0, 7)))].sort();
@@ -1068,8 +1118,9 @@
     S.scan = { step: 'review', parsed, photo: result ? result.photo : null, previewUrl: result ? result.previewUrl : null, failed: !result, text: result ? result.text : '' };
     Object.assign(S.form, {
       merchant: parsed.merchant || '', amountText: parsed.amount ? NF2.format(parsed.amount) : '',
-      occurred_on: parsed.date || todayISO(), category_id: parsed.categoryId || null, catTouched: !!parsed.categoryId,
-      payment_method: parsed.payment || 'card',
+      occurred_on: parsed.date || todayISO(), category_id: parsed.categoryId || (parsed.isFuel && fuelCat() ? fuelCat().id : null),
+      catTouched: !!(parsed.categoryId || parsed.isFuel), payment_method: parsed.payment || 'card',
+      fuel_liters: parsed.liters ? NF2.format(parsed.liters) : '',
     });
     render();
   }
@@ -1167,7 +1218,7 @@
     },
     who(d) { S.form.paid_by = d.id; render(); },
     pickCat(d) { S.form.category_id = d.id; S.form.catTouched = true; render(); },
-    selectCat(d, el) { S.form.category_id = el.value || null; S.form.catTouched = true; },
+    selectCat(d, el) { S.form.category_id = el.value || null; S.form.catTouched = true; render(); },
     method(d) { S.form.payment_method = d.m; render(); },
     showNote() { S.form.showNote = true; render(); const el = document.getElementById('f-note'); if (el) el.focus(); },
     toggleRefund() { S.form.refund = !S.form.refund; render(); },
@@ -1191,9 +1242,13 @@
           await api().upload(receiptPath, S.scan.photo);
         }
         const signed = f.kind === 'expense' && f.refund ? -amount : amount;
+        const isFuel = f.kind === 'expense' && isFuelCat(cat(f.category_id));
+        const liters = isFuel && f.fuel_liters ? parseAmount(f.fuel_liters) : NaN;
+        const odo = isFuel && f.odometer ? parseInt(String(f.odometer).replace(/\D/g, ''), 10) : NaN;
         const row = {
           kind: f.kind, amount: signed, occurred_on: f.occurred_on, merchant: f.merchant.trim() || null, category_id: f.category_id,
           payment_method: f.payment_method || null, paid_by: f.paid_by, note: (f.note || '').trim() || null, receipt_path: receiptPath || null,
+          fuel_liters: liters > 0 && liters < 1000 ? liters : null, odometer_km: odo > 0 ? odo : null,
         };
         try {
           if (f.id) await api().update('transactions', f.id, row);

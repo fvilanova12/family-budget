@@ -261,6 +261,31 @@
     return null;
   }
 
+  // Fuel tickets: "SP95 32,15 L x 1,499", "Litros: 32,150", "GASOLEO A 40,02 LTS".
+  // Only trusted when the receipt is clearly a fuel purchase (avoids "Agua 1,5 L").
+  const FUEL_RE = /gasolin|gasoleo|diesel|\bsp ?9[58]\b|sin plomo|efitec|carburante|surtidor|repostaje|\bmoeve\b|repsol|cepsa|\bgalp\b|ballenoil|petroprix|plenoil|\bshell\b|\bbp\b|\be\.s\.|estacion de servicio|\bpump\b|\bfuel\b/;
+  function findLiters(n, amount) {
+    if (!FUEL_RE.test(n)) return { isFuel: false, liters: null };
+    const pats = [/litros?\s*:?\s*(\d{1,3}[.,]\d{1,3})/, /(\d{1,3}[.,]\d{1,3})\s*(?:l|lt|lts|ltr|ltrs|litros?)\b/, /\bvol(?:umen)?\.?\s*:?\s*(\d{1,3}[.,]\d{1,3})/];
+    for (const re of pats) {
+      const m = n.match(re);
+      if (m) {
+        const v = parseFloat(m[1].replace(',', '.'));
+        if (v >= 1 && v <= 200) return { isFuel: true, liters: Math.round(v * 100) / 100 };
+      }
+    }
+    // Fallback: litres = total / price per litre ("x 1,529", "1,529 €/l", "precio/l 1,529").
+    if (amount) {
+      const pm = n.match(/(?:x|precio\s*\/?\s*l(?:itro)?|p\.?\s*u\.?)\s*:?\s*([12][.,]\d{3})\b/) || n.match(/\b([12][.,]\d{3})\s*(?:€|eur)?\s*\/\s*l/);
+      if (pm) {
+        const price = parseFloat(pm[1].replace(',', '.'));
+        const v = Math.round((amount / price) * 100) / 100;
+        if (price > 0.8 && price < 3 && v >= 1 && v <= 200) return { isFuel: true, liters: v };
+      }
+    }
+    return { isFuel: true, liters: null };
+  }
+
   // rules: [{pattern, display_name, category_id}] (category_id null = ask)
   function parse(text, rules, today) {
     const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -276,6 +301,7 @@
       categoryId: merchant && merchant.rule ? merchant.rule.category_id : null,
       fromKnownShop: !!(merchant && merchant.rule),
       payment: findPayment(n),
+      ...findLiters(n, amount ? amount.value : null),
     };
   }
 
