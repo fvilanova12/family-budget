@@ -9,9 +9,20 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Ping Supabase
         run: |
-          URL=$(grep -o "https://[a-z0-9]*\.supabase\.co" config.js)
-          KEY=$(grep -o "sb_publishable_[A-Za-z0-9_-]*" config.js)
-          curl -sf -X POST "$URL/rest/v1/rpc/keepalive" -H "apikey: $KEY" -H "Content-Type: application/json" -d '{}'
+          URL=$(grep -o "https://[a-z0-9]*\.supabase\.co" config.js | head -1)
+          KEY=$(grep -o "sb_publishable_[A-Za-z0-9_-]*" config.js | head -1)
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "::error::Could not read the Supabase URL or publishable key from config.js"
+            exit 1
+          fi
+          echo "Pinging $URL"
+          # Retry to ride out short DNS or network blips on the runner.
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 15 --retry-all-errors --max-time 30 \
+            -X POST "$URL/rest/v1/rpc/keepalive" \
+            -H "apikey: $KEY" -H "Content-Type: application/json" -d '{}'
+          echo
+          echo "Supabase responded OK"
